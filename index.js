@@ -94,6 +94,52 @@ async function run() {
             res.send(result);
         });
 
+        app.post("/tracking", async (req, res) => {
+            try {
+                const { parcelId, trackingNumber, status, location, message, updatedBy } = req.body;
+
+                if (!parcelId || !trackingNumber || !status) {
+                    return res.status(400).json({ message: "parcelId, trackingNumber, and status are required" });
+                }
+
+                const result = await trackingCollection.insertOne({
+                    parcelId: new ObjectId(parcelId),
+                    trackingNumber,
+                    status,
+                    updatedBy: updatedBy || "system",
+                    location: location || "",
+                    message: message || "",
+                    timestamp: new Date()
+                });
+
+                res.status(201).json({ message: "Tracking update added", insertedId: result.insertedId });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ message: "Failed to add tracking update", error: err.message });
+            }
+        });
+
+        app.get("/tracking/:trackingNumber", async (req, res) => {
+            try {
+                const { trackingNumber } = req.params;
+
+                const updates = await trackingCollection
+                    .find({ trackingNumber })
+                    .sort({ timestamp: -1 }) // latest first
+                    .toArray();
+
+                if (!updates.length) {
+                    return res.status(404).json({ message: "No tracking updates found" });
+                }
+
+                res.status(200).json(updates);
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ message: "Failed to fetch tracking updates", error: err.message });
+            }
+        });
+
+
         app.get("/payments", async (req, res) => {
             try {
                 const { email } = req.query;
