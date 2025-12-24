@@ -33,6 +33,7 @@ async function run() {
 
         const db = client.db("zapShiftParcels");
         const parcelsCollection = db.collection("parcels");
+        const paymentsCollection = db.collection("payments");
 
         // Get parcels by user email using query parameter, sorted by latest first
         // Get all parcels OR parcels by user email (latest first)
@@ -93,6 +94,29 @@ async function run() {
             res.send(result);
         });
 
+        app.get("/payments", async (req, res) => {
+            try {
+                const { email } = req.query;
+
+                // if email exists → user payments
+                // if not → admin (all payments)
+                const query = email ? { userEmail: email } : {};
+
+                const payments = await paymentsCollection
+                    .find(query)
+                    .sort({ paidAt: -1 }) // latest first
+                    .toArray();
+
+                res.status(200).json(payments);
+            } catch (error) {
+                res.status(500).json({
+                    message: "Failed to load payment history",
+                    error: error.message
+                });
+            }
+        });
+
+
         app.post("/payments", async (req, res) => {
             try {
                 const paymentData = req.body;
@@ -113,9 +137,10 @@ async function run() {
                     userEmail: paymentData.senderEmail,
                     amount: paymentData.amount,
                     currency: "usd",
-                    paymentMethod: "card",
+                    paymentMethod: paymentData.paymentMethod || "card",
                     transactionId: paymentData.transactionId,
                     status: "paid",
+                    paidAtString: new Date().toISOString(),
                     paidAt: new Date()
                 });
 
@@ -132,7 +157,7 @@ async function run() {
 
                 res.status(201).json({
                     message: "Payment saved and parcel marked as paid",
-                    paymentId: paymentResult.insertedId
+                    insertedId: paymentResult.insertedId
                 });
 
             } catch (error) {
