@@ -1,0 +1,32 @@
+{
+    "_id": {
+        "$oid": "69494bee02c47e1180dec801"
+    },
+    "type": "document",
+    "senderEmail": "bibimariyamnavila@gmail.com",
+    "parcelName": "My certificate photocopy",
+    "senderName": "Melinda",
+    "senderContact": "012345678911",
+    "senderRegion": "Chattogram",
+    "senderDistrict": "Chattogram",
+    "senderAddress": "mirshoraii",
+    "pickupInstruction": "frgrf srdfvf srgfvvg sdfvrf",
+    "receiverName": "Foysal",
+    "receiverEmail": "",
+    "receiverContact": "012345678119",
+    "receiverRegion": "Dhaka",
+    "receiverDistrict": "Dhaka",
+    "receiverAddress": "gulshan",
+    "deliveryInstruction": "tfgvrg rfvrgv rgfd dfgvd",
+    "cost": 100,
+    "deliveryZone": "Outside City/District",
+    "userEmail": "bibimariyamnavila@gmail.com",
+    "status": "pending",
+    "paymentStatus": "unpaid",
+    "deliveryStatus": "not-collected",
+    "trackingNumber": "PKG-98898671-YXWV",
+    "creationDate": "2025-12-22T10:21:38.671Z",
+    "createdAtTimestamp": {
+        "$numberLong": "1766398898671"
+    }
+}

@@ -1,6 +1,8 @@
 // index.js
 const express = require('express');
 const cors = require('cors');
+const Stripe = require("stripe");
+
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
@@ -11,6 +13,7 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+const stripe = new Stripe(process.env.PAYMENT_GATEWAY_KEY);
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster033.bpxhzqh.mongodb.net/?appName=Cluster033`;
 
@@ -89,6 +92,88 @@ async function run() {
             });
             res.send(result);
         });
+
+        app.post("/payments", async (req, res) => {
+            try {
+                const paymentData = req.body;
+
+                /*
+                  Expected body:
+                  {
+                    parcelId,
+                    senderEmail,
+                    amount,
+                    transactionId
+                  }
+                */
+
+                // 1️⃣ save payment history
+                const paymentResult = await paymentsCollection.insertOne({
+                    parcelId: new ObjectId(paymentData.parcelId),
+                    userEmail: paymentData.senderEmail,
+                    amount: paymentData.amount,
+                    currency: "usd",
+                    paymentMethod: "card",
+                    transactionId: paymentData.transactionId,
+                    status: "paid",
+                    paidAt: new Date()
+                });
+
+                // 2️⃣ update parcel payment status
+                await parcelsCollection.updateOne(
+                    { _id: new ObjectId(paymentData.parcelId) },
+                    {
+                        $set: {
+                            paymentStatus: "paid",
+                            // paidAt: new Date()
+                        }
+                    }
+                );
+
+                res.status(201).json({
+                    message: "Payment saved and parcel marked as paid",
+                    paymentId: paymentResult.insertedId
+                });
+
+            } catch (error) {
+                console.error("Payment save error:", error);
+                res.status(500).json({
+                    message: "Failed to save payment",
+                    error: error.message
+                });
+            }
+        });
+
+
+        app.post("/create-payment-intent", async (req, res) => {
+            const amountInCents = req.body.amountInCents;
+            try {
+                if (!amountInCents) {
+                    return res.status(400).json({ message: "Amount in cents is required" });
+                }
+
+                const amount = Math.round(amountInCents); // Stripe uses cents
+
+                const paymentIntent = await stripe.paymentIntents.create({
+                    amount,
+                    currency: "usd",
+                    payment_method_types: ["card"],
+                });
+
+                res.status(200).json({
+                    clientSecret: paymentIntent.client_secret,
+                });
+
+            } catch (error) {
+                console.error("Stripe error:", error);
+
+                res.status(500).json({
+                    message: "Failed to create payment intent",
+                    error: error.message,
+                });
+            }
+        });
+
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
