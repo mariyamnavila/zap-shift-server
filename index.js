@@ -32,8 +32,27 @@ async function run() {
         await client.connect();
 
         const db = client.db("zapShiftParcels");
+        const usersCollection = db.collection("users");
         const parcelsCollection = db.collection("parcels");
         const paymentsCollection = db.collection("payments");
+        const trackingCollection = db.collection("tracking");
+
+        app.post('/users', async (req, res) => {
+            try {
+                const email = req.body.email;
+
+                const existingUser = await usersCollection.findOne({ email: email });
+                if (existingUser) {
+                    return res.status(200).json({ message: "User already exists" , inserted: false });
+                }
+                const userData = req.body;
+                const result = await usersCollection.insertOne(userData);
+
+                res.send(result);
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
 
         // Get parcels by user email using query parameter, sorted by latest first
         // Get all parcels OR parcels by user email (latest first)
