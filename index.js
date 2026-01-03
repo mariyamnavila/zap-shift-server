@@ -147,6 +147,25 @@ async function run() {
             res.send(result);
         });
 
+        app.get("/riders/pending", async (req, res) => {
+            try {
+                const query = { status: "pending" };
+
+                const pendingRiders = await ridersCollection
+                    .find(query)
+                    .sort({ appliedAt: -1 }) // latest first
+                    .toArray();
+
+                res.status(200).json(pendingRiders);
+            } catch (error) {
+                console.error("Error fetching pending riders:", error);
+                res.status(500).json({
+                    message: "Failed to load pending riders",
+                });
+            }
+        });
+
+
         app.post('/riders', async (req, res) => {
             try {
                 const riderData = req.body;
