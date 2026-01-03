@@ -165,6 +165,15 @@ async function run() {
             }
         });
 
+        // Get active riders
+        app.get("/riders/active", async (req, res) => {
+            const riders = await ridersCollection
+                .find({ status: "active" })
+                .sort({ appliedAt: -1 })
+                .toArray();
+
+            res.send(riders);
+        });
 
         app.post('/riders', async (req, res) => {
             try {
