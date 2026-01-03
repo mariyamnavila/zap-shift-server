@@ -2,6 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 const Stripe = require("stripe");
+const admin = require("firebase-admin");
 
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
@@ -12,6 +13,13 @@ const port = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+const serviceAccount = require("./firebase-admin-key.json");
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
+
 
 const stripe = new Stripe(process.env.PAYMENT_GATEWAY_KEY);
 
@@ -37,13 +45,37 @@ async function run() {
         const paymentsCollection = db.collection("payments");
         const trackingCollection = db.collection("tracking");
 
+        // custom middleware
+        const verifyFBToken = async (req, res, next) => {
+            // Implement Firebase token verification logic here
+            const authHeader = req.headers.authorization;
+            console.log(authHeader);
+            // If not, return res.status(401).json({ message: "Unauthorized" });
+            if (!authHeader || !authHeader.startsWith("Bearer ")) {
+                return res.status(401).json({ message: "Unauthorized access" });
+            }
+            const token = authHeader.split(' ')[1];
+            if (!token) {
+                return res.status(401).json({ message: "Unauthorized access" });
+            }
+            // If verified, call next()
+
+            try {
+                const decoded = await admin.auth().verifyIdToken(token)
+                req.decoded = decoded
+                next();
+            } catch (error) {
+                return res.status(403).json({ message: "forbidden access" });
+            }
+        }
+
         app.post('/users', async (req, res) => {
             try {
                 const email = req.body.email;
 
                 const existingUser = await usersCollection.findOne({ email: email });
                 if (existingUser) {
-                    return res.status(200).json({ message: "User already exists" , inserted: false });
+                    return res.status(200).json({ message: "User already exists", inserted: false });
                 }
                 const userData = req.body;
                 const result = await usersCollection.insertOne(userData);
@@ -56,9 +88,10 @@ async function run() {
 
         // Get parcels by user email using query parameter, sorted by latest first
         // Get all parcels OR parcels by user email (latest first)
-        app.get('/parcels', async (req, res) => {
+        app.get('/parcels', verifyFBToken, async (req, res) => {
             try {
                 const { email } = req.query;
+                console.log(req.headers, 'authorization');
 
                 // if email exists, filter by email, otherwise get all
                 const query = email ? { userEmail: email } : {};
@@ -75,7 +108,7 @@ async function run() {
         });
 
 
-        app.get('/parcels/:id', async (req, res) => {
+        app.get('/parcels/:id', verifyFBToken, async (req, res) => {
             try {
                 const id = req.params.id;
 
@@ -159,9 +192,13 @@ async function run() {
         });
 
 
-        app.get("/payments", async (req, res) => {
+        app.get("/payments", verifyFBToken, async (req, res) => {
             try {
                 const { email } = req.query;
+
+                if (req.decoded.email !== email) {
+                    return res.status(403).json({ message: "forbidden access" });
+                }
 
                 // if email exists → user payments
                 // if not → admin (all payments)
