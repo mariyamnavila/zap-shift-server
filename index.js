@@ -43,6 +43,7 @@ async function run() {
         const usersCollection = db.collection("users");
         const parcelsCollection = db.collection("parcels");
         const paymentsCollection = db.collection("payments");
+        const ridersCollection = db.collection("riders");
         const trackingCollection = db.collection("tracking");
 
         // custom middleware
@@ -144,6 +145,16 @@ async function run() {
                 _id: new ObjectId(id)
             });
             res.send(result);
+        });
+
+        app.post('/riders', async (req, res) => {
+            try {
+                const riderData = req.body;
+                const result = await ridersCollection.insertOne(riderData);
+                res.status(201).send(result)
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
         });
 
         app.post("/tracking", async (req, res) => {
