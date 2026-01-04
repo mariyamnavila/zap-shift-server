@@ -50,7 +50,6 @@ async function run() {
         const verifyFBToken = async (req, res, next) => {
             // Implement Firebase token verification logic here
             const authHeader = req.headers.authorization;
-            console.log(authHeader);
             // If not, return res.status(401).json({ message: "Unauthorized" });
             if (!authHeader || !authHeader.startsWith("Bearer ")) {
                 return res.status(401).json({ message: "Unauthorized access" });
@@ -60,7 +59,7 @@ async function run() {
                 return res.status(401).json({ message: "Unauthorized access" });
             }
             // If verified, call next()
-
+            
             try {
                 const decoded = await admin.auth().verifyIdToken(token)
                 req.decoded = decoded
@@ -69,6 +68,24 @@ async function run() {
                 return res.status(403).json({ message: "forbidden access" });
             }
         }
+
+        // Middleware to check if user is admin
+        const verifyAdmin = async (req, res, next) => {
+            try {
+                const email = req.decoded.email; // from verifyFBToken middleware
+
+                const user = await usersCollection.findOne({ email: email });
+
+                if (!user || user.role !== 'admin') {
+                    return res.status(403).json({ message: 'Access denied. Admin only.' });
+                }
+
+                req.user = user; // attach user to request
+                next();
+            } catch (error) {
+                res.status(500).json({ message: 'Server error', error: error.message });
+            }
+        };
 
         app.post('/users', async (req, res) => {
             try {
@@ -87,12 +104,130 @@ async function run() {
             }
         });
 
+        
+        // Search users by email or name
+        app.get('/users/search', verifyFBToken, async (req, res) => {
+            try {
+                const { query } = req.query;
+
+                if (!query || query.trim() === '') {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Search query is required'
+                    });
+                }
+
+                // Search by email or name (case-insensitive)
+                const users = await usersCollection.find({
+                    $or: [
+                        { email: { $regex: query, $options: 'i' } },
+                        { name: { $regex: query, $options: 'i' } }
+                    ]
+                })
+                    // .project({
+                    //     _id: 1,
+                    //     email: 1,
+                    //     name: 1,
+                    //     role: 1,
+                    //     createdAt: 1,
+                    //     lastLogIn: 1
+                    // })
+                    .limit(20) // Limit results to prevent overload
+                    .sort({ createdAt: -1 })
+                    .toArray();
+
+                res.status(200).json({
+                    success: true,
+                    count: users.length,
+                    users
+                });
+            } catch (error) {
+                console.error('User search error:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Error searching users',
+                    error: error.message
+                });
+            }
+        });
+
+        // Update user role (make admin or remove admin)
+        // /users/${userId}/role
+        app.patch('/users/:id/role', async (req, res) => {
+            try {
+                const { id } = req.params;
+                const { role } = req.body; // Expected: 'admin' or 'user'
+
+                // Validate role
+                if (!role || !['admin', 'user', 'rider'].includes(role)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid role. Must be "admin", "user", or "rider"'
+                    });
+                }
+
+                // Update the role
+                const result = await usersCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    {
+                        $set: {
+                            role: role,
+                            roleUpdatedAt: new Date()
+                        }
+                    }
+                );
+
+                res.send(result);
+            } catch (error) {
+                console.error('Update role error:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Error updating user role',
+                    error: error.message
+                });
+            }
+        });
+
+        // Get admin statistics (optional but useful)
+        app.get('/admin/stats', verifyFBToken, async (req, res) => {
+            try {
+                const totalUsers = await usersCollection.countDocuments();
+                const totalAdmins = await usersCollection.countDocuments({ role: 'admin' });
+                const totalRiders = await usersCollection.countDocuments({ role: 'rider' });
+
+                // Users created in last 7 days
+                const sevenDaysAgo = new Date();
+                sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+                const recentUsers = await usersCollection.countDocuments({
+                    createdAt: { $gte: sevenDaysAgo }
+                });
+
+                res.status(200).json({
+                    success: true,
+                    stats: {
+                        totalUsers,
+                        totalAdmins,
+                        totalRiders,
+                        recentUsers,
+                        regularUsers: totalUsers - totalAdmins - totalRiders
+                    }
+                });
+            } catch (error) {
+                console.error('Stats fetch error:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching statistics',
+                    error: error.message
+                });
+            }
+        });
+
         // Get parcels by user email using query parameter, sorted by latest first
         // Get all parcels OR parcels by user email (latest first)
         app.get('/parcels', verifyFBToken, async (req, res) => {
             try {
                 const { email } = req.query;
-                console.log(req.headers, 'authorization');
 
                 // if email exists, filter by email, otherwise get all
                 const query = email ? { userEmail: email } : {};
@@ -185,10 +320,11 @@ async function run() {
             }
         });
 
+        // WHY: Using PATCH instead of PUT because we only update status
 
         app.patch("/riders/:id/status", async (req, res) => {
             const { id } = req.params;
-            const { status } = req.body;
+            const { status, email } = req.body;
 
             try {
                 const result = await ridersCollection.updateOne(
@@ -200,6 +336,18 @@ async function run() {
                         }
                     }
                 );
+
+                // If approved, also update users collection to set role to 'rider'
+                if (status === "active" && email) {
+                    const userQuery = { email: email };
+                    const userUpdatedDoc = {
+                        $set:
+                        {
+                            role: "rider"
+                        }
+                    }
+                    const roleResult = await usersCollection.updateOne(userQuery, userUpdatedDoc);
+                }
 
                 res.send(result);
 
