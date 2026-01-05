@@ -258,10 +258,10 @@ async function run() {
         app.get('/parcels', verifyFBToken, async (req, res) => {
             try {
                 const { email, paymentStatus, deliveryStatus } = req.query;
-                 
+
                 let query = {};
 
-                if (email) { 
+                if (email) {
                     query = { userEmail: email };
                 }
 
@@ -325,6 +325,39 @@ async function run() {
             });
             res.send(result);
         });
+
+        app.get('/riders', verifyFBToken, verifyAdmin, async (req, res) => {
+            try {
+                const { district } = req.query;
+
+                // if (!district) {
+                //     return res.status(400).json({
+                //         success: false,
+                //         message: 'District query parameter is required'
+                //     });
+                // }
+
+                const query = {
+                    district: district,
+                    // status: 'active',
+                };
+
+                const riders = await ridersCollection
+                    .find(query)
+                    .sort({ createdAt: -1 })
+                    .toArray();
+
+                res.status(200).json(riders);
+            } catch (error) {
+                console.error('Get riders error:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Failed to load riders',
+                    error: error.message
+                });
+            }
+        });
+
 
         app.get("/riders/pending", verifyFBToken, verifyAdmin, async (req, res) => {
             try {
