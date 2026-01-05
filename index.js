@@ -318,6 +318,90 @@ async function run() {
             }
         });
 
+        app.patch('/parcels/:parcelId/assign-rider', verifyFBToken, verifyAdmin, async (req, res) => {
+            try {
+                const { parcelId } = req.params;
+                const { riderId, riderName, riderEmail } = req.body;
+
+                if (!riderId) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Rider ID is required'
+                    });
+                }
+
+                const parcelObjectId = new ObjectId(parcelId);
+                const riderObjectId = { _id: new ObjectId(riderId) };
+
+                console.log(riderId);
+
+                // 1️⃣ Check rider availability
+                const rider = await ridersCollection.findOne(riderObjectId,
+                    { status: 'active' });
+
+                if (!rider) {
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Rider not found or not eligible'
+                    });
+                }
+
+                if (rider.workStatus === 'in-delivery') {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Rider is already in delivery'
+                    });
+                }
+
+                // 2️⃣ Update Parcel
+                const parcelUpdate = await parcelsCollection.updateOne(
+                    {
+                        _id: parcelObjectId,
+                        deliveryStatus: 'not-collected'
+                    },
+                    {
+                        $set: {
+                            deliveryStatus: 'rider-assigned',
+                            assignedRiderId: riderObjectId,
+                            assignedRiderName: riderName || rider.name,
+                            assignedRiderEmail: riderEmail || rider.email,
+                            assignedAt: new Date()
+                        }
+                    }
+                );
+
+                if (parcelUpdate.modifiedCount === 0) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Parcel not available for assignment'
+                    });
+                }
+
+                // 3️⃣ Update Rider work status
+                const riderUpdate = await ridersCollection.updateOne(
+                    { _id: riderObjectId },
+                    {
+                        $set: {
+                            workStatus: 'in-delivery',
+                            lastAssignedAt: new Date()
+                        }
+                    }
+                );
+
+                res.status(200).json(riderUpdate);
+
+            } catch (error) {
+                console.error('Assign rider error:', error);
+                res.status(500).json({
+                    success: false,
+                    message: 'Failed to assign rider',
+                    error: error.message
+                });
+            }
+        }
+        );
+
+
         app.delete('/parcels/:id', async (req, res) => {
             const id = req.params.id;
             const result = await parcelsCollection.deleteOne({
@@ -424,6 +508,7 @@ async function run() {
                         }
                     }
                     const roleResult = await usersCollection.updateOne(userQuery, userUpdatedDoc);
+                    console.log(roleResult);
                 }
 
                 res.send(result);
