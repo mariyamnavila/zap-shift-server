@@ -59,7 +59,7 @@ async function run() {
                 return res.status(401).json({ message: "Unauthorized access" });
             }
             // If verified, call next()
-            
+
             try {
                 const decoded = await admin.auth().verifyIdToken(token)
                 req.decoded = decoded
@@ -104,9 +104,9 @@ async function run() {
             }
         });
 
-        
+
         // Search users by email or name
-        app.get('/users/search', verifyFBToken, async (req, res) => {
+        app.get('/users/search', verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const { query } = req.query;
 
@@ -151,9 +151,39 @@ async function run() {
             }
         });
 
+        app.get("/users/:email/role", async (req, res) => {
+            const email = req.params.email;
+
+            if (!email) {
+                return res.status(400).json({ message: "Email is required" });
+            }
+
+            try {
+                const user = await usersCollection.findOne(
+                    { email },
+                    { projection: { role: 1 } }
+                );
+
+                // Fallback for first-time / social login users
+                if (!user) {
+                    return res.status(200).json({ role: "user" });
+                }
+
+                res.status(200).json({ role: user.role });
+
+            } catch (error) {
+                console.error("Get role error:", error);
+                res.status(500).json({
+                    message: "Failed to get user role",
+                    error: error.message
+                });
+            }
+        });
+
+
         // Update user role (make admin or remove admin)
         // /users/${userId}/role
-        app.patch('/users/:id/role', async (req, res) => {
+        app.patch('/users/:id/role', verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const { id } = req.params;
                 const { role } = req.body; // Expected: 'admin' or 'user'
@@ -189,7 +219,7 @@ async function run() {
         });
 
         // Get admin statistics (optional but useful)
-        app.get('/admin/stats', verifyFBToken, async (req, res) => {
+        app.get('/admin/stats', verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const totalUsers = await usersCollection.countDocuments();
                 const totalAdmins = await usersCollection.countDocuments({ role: 'admin' });
@@ -227,10 +257,24 @@ async function run() {
         // Get all parcels OR parcels by user email (latest first)
         app.get('/parcels', verifyFBToken, async (req, res) => {
             try {
-                const { email } = req.query;
+                const { email, paymentStatus, deliveryStatus } = req.query;
+                 
+                let query = {};
 
-                // if email exists, filter by email, otherwise get all
-                const query = email ? { userEmail: email } : {};
+                if (email) { 
+                    query = { userEmail: email };
+                }
+
+                if (paymentStatus) {
+                    query.paymentStatus = paymentStatus;
+                }
+
+                if (deliveryStatus) {
+                    query.deliveryStatus = deliveryStatus;
+                }
+
+                console.log("QUERY PARAMS:", req.query);
+                console.log("MONGO QUERY:", query);
 
                 const parcels = await parcelsCollection
                     .find(query)
@@ -282,7 +326,7 @@ async function run() {
             res.send(result);
         });
 
-        app.get("/riders/pending", async (req, res) => {
+        app.get("/riders/pending", verifyFBToken, verifyAdmin, async (req, res) => {
             try {
                 const query = { status: "pending" };
 
@@ -301,7 +345,7 @@ async function run() {
         });
 
         // Get active riders
-        app.get("/riders/active", async (req, res) => {
+        app.get("/riders/active", verifyFBToken, verifyAdmin, async (req, res) => {
             const riders = await ridersCollection
                 .find({ status: "active" })
                 .sort({ appliedAt: -1 })
