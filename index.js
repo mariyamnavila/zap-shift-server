@@ -273,8 +273,6 @@ async function run() {
                     query.deliveryStatus = deliveryStatus;
                 }
 
-                console.log("QUERY PARAMS:", req.query);
-                console.log("MONGO QUERY:", query);
 
                 const parcels = await parcelsCollection
                     .find(query)
@@ -401,6 +399,112 @@ async function run() {
         }
         );
 
+        app.patch(
+            '/parcels/:parcelId/status',
+            verifyFBToken,
+            async (req, res) => {
+                try {
+                    const { parcelId } = req.params;
+                    const { deliveryStatus } = req.body;
+
+                    if (!deliveryStatus) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'deliveryStatus is required'
+                        });
+                    }
+
+                    if (!['in-transit', 'delivered'].includes(deliveryStatus)) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Invalid delivery status'
+                        });
+                    }
+
+                    const parcelObjectId = new ObjectId(parcelId);
+
+                    // Fetch parcel
+                    const parcel = await parcelsCollection.findOne({
+                        _id: parcelObjectId
+                    });
+
+                    if (!parcel) {
+                        return res.status(404).json({
+                            success: false,
+                            message: 'Parcel not found'
+                        });
+                    }
+
+                    // Validate status transition
+                    if (
+                        parcel.deliveryStatus === 'rider-assigned' &&
+                        deliveryStatus !== 'in-transit'
+                    ) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Parcel must be picked up first'
+                        });
+                    }
+
+                    if (
+                        parcel.deliveryStatus === 'in-transit' &&
+                        deliveryStatus !== 'delivered'
+                    ) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Parcel must be delivered next'
+                        });
+                    }
+
+                    // Update parcel status
+                    const updateDoc = {
+                        deliveryStatus,
+                        statusUpdatedAt: new Date()
+                    };
+
+                    if (deliveryStatus === 'in-transit') {
+                        updateDoc.pickedUpAt = new Date();
+                    }
+
+                    if (deliveryStatus === 'delivered') {
+                        updateDoc.deliveredAt = new Date();
+                    }
+
+                    await parcelsCollection.updateOne(
+                        { _id: parcelObjectId },
+                        { $set: updateDoc }
+                    );
+
+                    // If delivered → set rider workStatus back to idle
+                    if (deliveryStatus === 'delivered' && parcel.assignedRiderId) {
+                        await ridersCollection.updateOne(
+                            { _id: new ObjectId(parcel.assignedRiderId) },
+                            {
+                                $set: {
+                                    workStatus: 'idle',
+                                    lastDeliveryCompletedAt: new Date()
+                                }
+                            }
+                        );
+                    }
+
+                    res.status(200).json({
+                        success: true,
+                        message: `Parcel marked as ${deliveryStatus}`
+                    });
+
+                } catch (error) {
+                    console.error('Update parcel status error:', error);
+                    res.status(500).json({
+                        success: false,
+                        message: 'Failed to update parcel status',
+                        error: error.message
+                    });
+                }
+            }
+        );
+
+
 
         app.delete('/parcels/:id', async (req, res) => {
             const id = req.params.id;
@@ -470,6 +574,36 @@ async function run() {
 
             res.send(riders);
         });
+
+        // Get pending parcels for a specific rider
+        app.get("/riders/:email/pending-parcels", async (req, res) => {
+            try {
+                const riderEmail = req.params.email;
+
+                if (!riderEmail) {
+                    return res.status(400).json({ message: "Rider email is required" });
+                }
+
+                const pendingParcels = await parcelsCollection
+                    .find({
+                        assignedRiderEmail: riderEmail,
+                        deliveryStatus: {
+                            $in: ["rider-assigned", "in-transit"]
+                        }
+                    })
+                    .sort({ assignedAt: -1 }) // latest task first
+                    .toArray();
+
+                res.status(200).json(pendingParcels);
+            } catch (error) {
+                console.error("Error loading rider parcels:", error);
+                res.status(500).json({
+                    message: "Failed to load rider pending parcels",
+                    error: error.message
+                });
+            }
+        });
+
 
         app.post('/riders', async (req, res) => {
             try {
