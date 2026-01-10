@@ -479,6 +479,61 @@ async function run() {
         }
         );
 
+        app.patch( "/parcels/:id/cashOut", verifyFBToken, async (req, res) => {
+                try {
+                    const { id } = req.params;
+
+                    const parcel = await parcelsCollection.findOne({
+                        _id: new ObjectId(id)
+                    });
+
+                    // ✅ Must be delivered
+                    if (parcel.deliveryStatus !== "delivered") {
+                        return res.status(400).json({
+                            success: false,
+                            message: "Parcel is not delivered yet"
+                        });
+                    }
+
+                    // 🚫 Prevent double cash-out
+                    if (parcel.cashOutStatus === "paid") {
+                        return res.status(400).json({
+                            success: false,
+                            message: "Cash-out already completed"
+                        });
+                    }
+
+                    // 💰 Calculate earning
+                    const isSameDistrict =
+                        parcel.senderDistrict === parcel.receiverDistrict;
+
+                    const earningRate = isSameDistrict ? 0.8 : 0.3;
+                    const riderEarning = Math.round(parcel.cost * earningRate);
+
+                    // 💾 Update parcel
+                    const result = await parcelsCollection.updateOne(
+                        { _id: new ObjectId(id) },
+                        {
+                            $set: {
+                                cashOutStatus: "paid",
+                                cashOutAt: new Date(),
+                                riderEarning
+                            }
+                        }
+                    );
+
+                    res.status(200).json(result);
+
+                } catch (error) {
+                    console.error("Cash-out error:", error);
+                    res.status(500).json({
+                        success: false,
+                        message: "Internal server error"
+                    });
+                }
+            }
+        );
+
         app.delete('/parcels/:id', async (req, res) => {
             const id = req.params.id;
             const result = await parcelsCollection.deleteOne({
@@ -578,7 +633,7 @@ async function run() {
         });
 
         // Get completed parcels for a specific rider
-        app.get("/riders/:email/completed-parcels", verifyFBToken,verifyRider, async (req, res) => {
+        app.get("/riders/:email/completed-parcels", verifyFBToken, verifyRider, async (req, res) => {
             try {
                 const riderEmail = req.params.email;
 
