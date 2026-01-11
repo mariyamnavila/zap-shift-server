@@ -44,7 +44,7 @@ async function run() {
         const parcelsCollection = db.collection("parcels");
         const paymentsCollection = db.collection("payments");
         const ridersCollection = db.collection("riders");
-        const trackingCollection = db.collection("tracking");
+        const trackingsCollection = db.collection("tracking");
 
         // custom middleware
         const verifyFBToken = async (req, res, next) => {
@@ -321,6 +321,41 @@ async function run() {
             }
         });
 
+        app.get("/parcels/delivery/status-count", async (req, res) => {
+            try {
+
+                const pipeline = [
+                    {
+                        $group: {
+                            _id: "$deliveryStatus",
+                            count: { $sum: 1 }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 0,
+                            status: "$_id",
+                            count: 1
+                        }
+                    },
+                    {
+                        $sort: { status: 1 }
+                    }
+                ];
+
+                const result = await parcelsCollection.aggregate(pipeline).toArray();
+
+                res.status(200).json(result);
+            } catch (error) {
+                console.error("Error counting parcels by status:", error);
+                res.status(500).json({
+                    message: "Failed to load parcel status counts",
+                    error: error.message
+                });
+            }
+        });
+
+
         app.post('/parcels', async (req, res) => {
             try {
                 const parcelData = req.body;
@@ -459,7 +494,7 @@ async function run() {
                         { _id: new ObjectId(parcel.assignedRiderId) },
                         {
                             $set: {
-                                workStatus: 'idle',
+                                // workStatus: 'idle',
                                 lastDeliveryCompletedAt: new Date()
                             }
                         }
@@ -479,59 +514,59 @@ async function run() {
         }
         );
 
-        app.patch( "/parcels/:id/cashOut", verifyFBToken, async (req, res) => {
-                try {
-                    const { id } = req.params;
+        app.patch("/parcels/:id/cashOut", verifyFBToken, async (req, res) => {
+            try {
+                const { id } = req.params;
 
-                    const parcel = await parcelsCollection.findOne({
-                        _id: new ObjectId(id)
-                    });
+                const parcel = await parcelsCollection.findOne({
+                    _id: new ObjectId(id)
+                });
 
-                    // ✅ Must be delivered
-                    if (parcel.deliveryStatus !== "delivered") {
-                        return res.status(400).json({
-                            success: false,
-                            message: "Parcel is not delivered yet"
-                        });
-                    }
-
-                    // 🚫 Prevent double cash-out
-                    if (parcel.cashOutStatus === "paid") {
-                        return res.status(400).json({
-                            success: false,
-                            message: "Cash-out already completed"
-                        });
-                    }
-
-                    // 💰 Calculate earning
-                    const isSameDistrict =
-                        parcel.senderDistrict === parcel.receiverDistrict;
-
-                    const earningRate = isSameDistrict ? 0.8 : 0.3;
-                    const riderEarning = Math.round(parcel.cost * earningRate);
-
-                    // 💾 Update parcel
-                    const result = await parcelsCollection.updateOne(
-                        { _id: new ObjectId(id) },
-                        {
-                            $set: {
-                                cashOutStatus: "paid",
-                                cashOutAt: new Date(),
-                                riderEarning
-                            }
-                        }
-                    );
-
-                    res.status(200).json(result);
-
-                } catch (error) {
-                    console.error("Cash-out error:", error);
-                    res.status(500).json({
+                // ✅ Must be delivered
+                if (parcel.deliveryStatus !== "delivered") {
+                    return res.status(400).json({
                         success: false,
-                        message: "Internal server error"
+                        message: "Parcel is not delivered yet"
                     });
                 }
+
+                // 🚫 Prevent double cash-out
+                if (parcel.cashOutStatus === "paid") {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Cash-out already completed"
+                    });
+                }
+
+                // 💰 Calculate earning
+                const isSameDistrict =
+                    parcel.senderDistrict === parcel.receiverDistrict;
+
+                const earningRate = isSameDistrict ? 0.8 : 0.3;
+                const riderEarning = Math.round(parcel.cost * earningRate);
+
+                // 💾 Update parcel
+                const result = await parcelsCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    {
+                        $set: {
+                            cashOutStatus: "paid",
+                            cashOutAt: new Date(),
+                            riderEarning
+                        }
+                    }
+                );
+
+                res.status(200).json(result);
+
+            } catch (error) {
+                console.error("Cash-out error:", error);
+                res.status(500).json({
+                    success: false,
+                    message: "Internal server error"
+                });
             }
+        }
         );
 
         app.delete('/parcels/:id', async (req, res) => {
@@ -719,7 +754,7 @@ async function run() {
                     return res.status(400).json({ message: "parcelId, trackingNumber, and status are required" });
                 }
 
-                const result = await trackingCollection.insertOne({
+                const result = await trackingsCollection.insertOne({
                     parcelId: new ObjectId(parcelId),
                     trackingNumber,
                     status,
@@ -736,11 +771,11 @@ async function run() {
             }
         });
 
-        app.get("/tracking/:trackingNumber", verifyFBToken, async (req, res) => {
+        app.get("/tracking/:trackingNumber", async (req, res) => {
             try {
                 const { trackingNumber } = req.params;
 
-                const updates = await trackingCollection
+                const updates = await trackingsCollection
                     .find({ trackingNumber })
                     .sort({ timestamp: -1 }) // latest first
                     .toArray();
